@@ -81,8 +81,10 @@ o kanalın `RUG%` ve `UNQ%` değerlerine iki kez bak.
 Normalde bir kanalı değerlendirmek için haftalarca beklemen gerekir.
 `backfill` beklemeyi ortadan kaldırır:
 
-```bash
-python -m tgfinder backfill @birkanal @baskabirkanal --days 14
+Telegram'da Kayıtlı Mesajlar'a şunu yaz:
+
+```
+/backfill @birkanal 14
 ```
 
 Kanalın son 14 günlük mesaj geçmişini okur, contract adreslerini çıkarır,
@@ -96,77 +98,122 @@ Kanalın son 14 günlük mesaj geçmişini okur, contract adreslerini çıkarır
 
 ---
 
-## Kurulum
+## Kurulum — kod bilmene gerek yok
 
-### 1. Telegram API anahtarı
-https://my.telegram.org → *API development tools* → `api_id` ve `api_hash` al.
+Kurduktan sonra sistemi **Telegram'dan kendine mesaj atarak** yönetiyorsun.
+Terminal, komut satırı, bilgisayara program kurma yok.
 
-### 2. Yerel kurulum
+### Adım 1 — Telegram API bilgilerini al
+
+https://my.telegram.org → telefon numaranla giriş → **API development tools** →
+bir uygulama oluştur (isim/kısa isim ne olursa olur).
+
+Sana iki şey verecek, ikisini de bir yere not et:
+- `api_id` — kısa bir sayı
+- `api_hash` — uzun bir harf-rakam dizisi
+
+### Adım 2 — Giriş anahtarını üret (tarayıcıdan)
+
+Bu depodaki `login_colab.ipynb` dosyasını Google Colab'da aç:
+
+```
+https://colab.research.google.com/github/OrbaySkrcl/telegram-group-finder/blob/claude/telegram-group-finding-strategy-ftjnmc/login_colab.ipynb
+```
+
+▶ tuşlarına basıp soruları yanıtla (api_id, api_hash, telefon, Telegram'dan gelen
+kod). Sonunda uzun bir metin basacak — bu senin `TG_SESSION` değerin, kopyala.
+
+> ⚠️ Bu metin hesabına tam erişimdir. Kimseyle paylaşma.
+>
+> Bu araç kanallara katılıyor ve Telegram toplu katılımı hız limitine takıyor.
+> **Ana hesabın yerine ayrı bir numarayla açılmış hesap kullanman önerilir.**
+
+### Adım 3 — Railway'de değişkenleri gir
+
+Servisin sayfasında **Variables** sekmesi → şu dördünü ekle:
+
+| Değişken | Değer |
+|---|---|
+| `TG_API_ID` | Adım 1'deki sayı |
+| `TG_API_HASH` | Adım 1'deki uzun dizi |
+| `TG_SESSION` | Adım 2'deki uzun metin |
+| `DB_PATH` | `/data/tgfinder.db` |
+
+### Adım 4 — Volume ekle (atlanırsa veri kaybolur)
+
+Servisin sayfasında **Volume** ekle, mount path: `/data`
+
+Bunu yapmazsan her güncellemede topladığın tüm geçmiş silinir.
+
+### Adım 5 — Telegram'dan kullan
+
+Deploy bitince Telegram'da **Kayıtlı Mesajlar**'ı (Saved Messages) aç.
+Sistem oraya "tgfinder çalışıyor" yazmış olacak.
+
+```
+/help                    komut listesi
+/backfill @kanal 14      kanalın son 14 gününü çek ve puanla
+/score                   liderlik tablosu
+/detail @kanal           o kanalın çağrı çağrı defteri
+/status                  sistem özeti
+```
+
+**Buradan başla:** zaten üye olduğun kanalları tek tek `/backfill @kanal 14`
+yaz. Birkaç dakika içinde sicil defterleri önüne gelir.
+
+---
+
+## Telegram komutları
+
+| Komut | Ne yapar |
+|---|---|
+| `/backfill @kanal 14` | Geçmişi çeker ve puanlar — **buradan başla** |
+| `/score` | Liderlik tablosu |
+| `/detail @kanal` | O kanalın çağrı çağrı defteri |
+| `/channels` | İzlenen kanallar |
+| `/monitor @kanal` | Canlı dinlemeye al / `/unmonitor` bırak |
+| `/discover solana calls` | Telegram dizininde kanal ara |
+| `/candidates` | Aday havuzu (bahsedilme sıralı) |
+| `/approve @kanal` | Adayı onayla / `/reject` ele |
+| `/join` | Onaylı adaylara katıl (günlük limitli) |
+| `/status` | Sistem özeti |
+
+Servis ayrıca her gün UTC 06:00'da liderlik tablosunu Kayıtlı Mesajlar'a gönderir.
+
+Kullandığı iki veri servisi (DexScreener, GeckoTerminal) API anahtarı istemez ve
+ücretsizdir. Sistem tek bir Python süreci + SQLite, kaynak kullanımı çok düşük —
+ama Railway'in ücretsiz kullanım limiti zaman içinde değişebiliyor, hesabındaki
+güncel plana bakmakta fayda var.
+
+---
+
+## Terminal kullanmayı tercih edersen
 
 ```bash
 git clone https://github.com/OrbaySkrcl/telegram-group-finder
 cd telegram-group-finder
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
 cp .env.example .env      # api_id / api_hash'i içine yaz
-python login.py           # telefon + kod → TG_SESSION çıktısını .env'e yapıştır
-```
+python login.py           # TG_SESSION üretir
 
-> `TG_SESSION` hesabına tam erişimdir. Repoya commit'leme, kimseyle paylaşma.
-> **Ana hesabınla değil, ayrı bir numara/hesapla kullan** — bu araç kanallara
-> katılıyor ve Telegram toplu katılımı hız limitine takar.
-
-### 3. İlk veri
-
-```bash
-# Zaten üye olduğun kanalları anında değerlendir
-python -m tgfinder backfill @kanal1 @kanal2 --days 14
+python -m tgfinder backfill @kanal --days 14
 python -m tgfinder score
-```
-
-### 4. Sürekli çalıştırma (Railway)
-
-1. Repoyu Railway'de yeni bir servis olarak bağla (Dockerfile'ı otomatik bulur).
-2. **Volume ekle**, mount path: `/data` — bunu yapmazsan her deploy'da tüm
-   geçmişi kaybedersin.
-3. Değişkenleri gir: `TG_API_ID`, `TG_API_HASH`, `TG_SESSION`,
-   `DB_PATH=/data/tgfinder.db`.
-4. Deploy. Servis kanalları canlı dinler, her gün UTC 06:00'da liderlik
-   tablosunu **Kayıtlı Mesajlar**'ına gönderir.
-
-Kaynak kullanımı çok düşük (tek Python süreci + SQLite), ama Railway'in ücretsiz
-kullanım limiti zaman içinde değişebiliyor — hesabındaki güncel plana bakmakta
-fayda var. Kullandığı iki veri servisi (DexScreener, GeckoTerminal) API anahtarı
-istemez ve ücretsizdir.
-
----
-
-## Komutlar
-
-```bash
-python -m tgfinder backfill @kanal --days 14   # geçmişi çek + puanla (buradan başla)
-python -m tgfinder score                       # liderlik tablosu
-python -m tgfinder detail @kanal               # o kanalın çağrı çağrı defteri
-python -m tgfinder channels                    # izlenen kanallar
-
-python -m tgfinder discover "solana calls"     # Telegram'ın kendi dizininde ara
-python -m tgfinder seed --file seeds.txt       # X'ten kopyaladığın metni yapıştır
-python -m tgfinder candidates                  # aday havuzu (bahsedilme sıralı)
-python -m tgfinder approve @kanal              # onayla
-python -m tgfinder join                        # onaylıları katıl (günlük limitli)
-
-python -m tgfinder monitor @kanal              # bu kanalı canlı dinlemeye al
-python -m tgfinder monitor @kanal --off        # dinlemeyi bırak
-python -m tgfinder run                         # servis modu (Railway girişi)
+python -m tgfinder detail @kanal
+python -m tgfinder channels
+python -m tgfinder discover "solana calls"
+python -m tgfinder candidates
+python -m tgfinder approve @kanal
+python -m tgfinder join
+python -m tgfinder monitor @kanal        # --off ile bırakır
+python -m tgfinder run                   # servis modu
 ```
 
 ### Gizlilik notu
 
-`run` hesabının üye olduğu her sohbeti otomatik olarak dinlemez. Sadece bilerek
-eklediğin kanalları okur (`backfill`, `join` veya `monitor` ile eklenenler).
-Kişisel grupların kapsam dışında kalır. Hepsini dinlemek istersen `run
---adopt-all` diyebilirsin, ama önerilmez.
+`run` hesabının üye olduğu her sohbeti otomatik dinlemez. Sadece bilerek
+eklediğin kanalları okur (`/backfill`, `/join` veya `/monitor` ile eklenenler).
+Kişisel grupların kapsam dışında kalır.
 
 ### Kendi kendini büyüten aday havuzu
 
@@ -176,19 +223,19 @@ kanal aynı yerden forward yapıyorsa, o kaynak muhtemelen zincirin yukarısıd�
 Bu, X'te arama yapmaktan çok daha verimli bir keşif yoludur — havuz kendi
 kendini besler.
 
-`join` günlük katılım limitine uyar ve katılımlar arasında bekler; Telegram
+`/join` günlük katılım limitine uyar ve katılımlar arasında bekler; Telegram
 toplu katılımı cezalandırır.
 
 ---
 
 ## Nasıl kullanılmalı
 
-1. Üye olduğun kanalları `backfill` et. Muhtemelen çoğunun `AVG$` değeri
+1. Üye olduğun kanalları `/backfill` et. Muhtemelen çoğunun `AVG$` değeri
    negatif çıkacak. Bu normal ve zaten öğrenmek istediğin şey buydu.
-2. `discover` + `seed` ile havuzu genişlet, `candidates` listesinden mantıklı
-   görünenleri onayla, `join` et.
-3. `run` ile birkaç hafta topla.
-4. Haftalık `score` bak. Sürekli pozitif `AVG$` + yüksek `1ST%` + düşük `RUG%`
+2. `/discover` ile havuzu genişlet, `/candidates` listesinden mantıklı
+   görünenleri `/approve` edip `/join` et.
+3. Birkaç hafta topla.
+4. Haftalık `/score` bak. Sürekli pozitif `AVG$` + yüksek `1ST%` + düşük `RUG%`
    olan **2-3 kanalla** çalış, gerisini bırak.
 5. Bir kanalın skoru düşmeye başlarsa bırak. Avantaj kalıcı değildir; kanal
    büyüdükçe avantajı kendiliğinden erir.

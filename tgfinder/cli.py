@@ -10,6 +10,7 @@ from pathlib import Path
 
 from . import discovery, report
 from .collector import Collector
+from .control import Control
 from .config import load_config
 from .db import Database
 from .prices import MarketData
@@ -225,8 +226,14 @@ async def cmd_run(args, cfg, db) -> int:
             tracker = Tracker(db, market, cfg)
             log.info("watching %d channel(s)", collector.monitored_count)
             if collector.monitored_count == 0:
-                log.warning("nothing is monitored yet - use `monitor @handle`, "
-                            "`backfill`, or run with --adopt-all")
+                log.warning("nothing is monitored yet - message the control chat "
+                            "with /backfill @channel 14 to get started")
+
+            # The control chat turns the service into something you can drive
+            # from Telegram, so a terminal is never required to use it.
+            control = Control(db, client, market, cfg, collector, tracker)
+            await control.start()
+
             await asyncio.gather(
                 tracker.run_forever(),
                 _daily_report(client, db, cfg),
