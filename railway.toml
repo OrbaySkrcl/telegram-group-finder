@@ -1,0 +1,7 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "python -m tgfinder run"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10

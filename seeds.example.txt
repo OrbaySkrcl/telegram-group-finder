@@ -1,0 +1,13 @@
+# Paste anything here: raw X search results, a list of handles, t.me links.
+# The parser picks out every Telegram handle it can find and ignores the rest.
+#
+#   python -m tgfinder seed --file seeds.example.txt
+#
+# Add --approve if you already trust the list and want `join` to pick it up.
+
+@example_alpha_calls
+https://t.me/example_gem_hunters
+t.me/example_degen_room
+
+# Lines copied straight out of an X search work too, links and all:
+# "new call 🚀 CA: 8xk... join us https://t.me/example_early_room DYOR"
