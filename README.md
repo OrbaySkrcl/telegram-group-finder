@@ -114,16 +114,33 @@ Sana iki şey verecek, ikisini de bir yere not et:
 
 ### Adım 2 — Giriş anahtarını üret (tarayıcıdan)
 
-Bu depodaki `login_colab.ipynb` dosyasını Google Colab'da aç:
+https://colab.research.google.com adresine git → **New notebook**.
 
+Açılan hücreye şunu yapıştır ve ▶ tuşuna bas:
+
+```python
+!pip install -q telethon nest_asyncio
+import nest_asyncio; nest_asyncio.apply()
+from telethon.sync import TelegramClient
+from telethon.sessions import StringSession
+
+api_id = int(input("api_id: ").strip())
+api_hash = input("api_hash: ").strip()
+
+with TelegramClient(StringSession(), api_id, api_hash) as client:
+    print("\nGiris basarili:", (client.get_me()).username)
+    print("\nTG_SESSION degerin (tamamini kopyala):\n")
+    print(client.session.save())
 ```
-https://colab.research.google.com/github/OrbaySkrcl/telegram-group-finder/blob/claude/telegram-group-finding-strategy-ftjnmc/login_colab.ipynb
-```
 
-▶ tuşlarına basıp soruları yanıtla (api_id, api_hash, telefon, Telegram'dan gelen
-kod). Sonunda uzun bir metin basacak — bu senin `TG_SESSION` değerin, kopyala.
+Sırayla soracak: `api_id`, `api_hash`, telefon numaran (`+905551112233`
+biçiminde), sonra Telegram'dan gelen kod. İki adımlı doğrulaman varsa şifreni de
+soracak. En sonda uzun bir metin basacak — bu senin `TG_SESSION` değerin.
 
-> ⚠️ Bu metin hesabına tam erişimdir. Kimseyle paylaşma.
+(Aynı işi yapan hazır defter depoda `login_colab.ipynb` olarak da duruyor;
+Colab'da *File → Upload notebook* ile açabilirsin.)
+
+> ⚠️ Bu metin hesabına tam erişimdir. Kimseyle paylaşma, hiçbir yere gönderme.
 >
 > Bu araç kanallara katılıyor ve Telegram toplu katılımı hız limitine takıyor.
 > **Ana hesabın yerine ayrı bir numarayla açılmış hesap kullanman önerilir.**
