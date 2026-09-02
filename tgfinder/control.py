@@ -75,18 +75,45 @@ def _clean_handle(token: str) -> str:
 
 
 class Control:
-    def __init__(self, db, client, market, cfg, collector, tracker):
+    """Command surface for the service.
+
+    Two transports. With TG_BOT_TOKEN set, a BotFather bot gives the tool its own
+    chat window, which keeps it out of Saved Messages. Without one, it falls back
+    to listening in whatever chat REPORT_CHAT names (Saved Messages by default).
+    """
+
+    def __init__(self, db, client, market, cfg, collector, tracker, bot=None):
         self.db = db
         self.client = client
         self.market = market
         self.cfg = cfg
         self.collector = collector
         self.tracker = tracker
+        self.bot = bot
         self.chat_id: int | None = None
+        self.owner_id: int | None = None
         self._own_messages: set[int] = set()
         self._busy = False
 
+    @property
+    def uses_bot(self) -> bool:
+        return self.bot is not None
+
     async def start(self) -> None:
+        me = await self.client.get_me()
+        self.owner_id = self.cfg.owner_id or int(me.id)
+
+        if self.uses_bot:
+            self.bot.add_event_handler(self._on_bot_message, events.NewMessage())
+            try:
+                await self.send("tgfinder çalışıyor. Komutlar için /help yaz.")
+            except Exception:
+                # A bot cannot message someone who has not started it yet. That is
+                # not an error - the first /start from the owner opens the channel.
+                log.warning("bot cannot message the owner yet - open the bot in "
+                            "Telegram and press Start")
+            return
+
         entity = await self.client.get_entity(self.cfg.report_chat)
         self.chat_id = int(entity.id)
         self.client.add_event_handler(self._on_message, events.NewMessage())
@@ -97,14 +124,21 @@ class Control:
     async def send(self, text: str, code: bool = False) -> None:
         for part in _chunks(text):
             body = f"```\n{part}\n```" if code else part
-            msg = await self.client.send_message(
-                self.chat_id, body,
-                parse_mode="md" if code else None, link_preview=False,
-            )
-            # Remember what we sent: our own messages land back here as events.
+            kwargs = {"parse_mode": "md" if code else None, "link_preview": False}
+            if self.uses_bot:
+                await self.bot.send_message(self.owner_id, body, **kwargs)
+                continue
+            msg = await self.client.send_message(self.chat_id, body, **kwargs)
+            # Our own replies land back in the control chat as new events.
             self._own_messages.add(int(msg.id))
 
     # ---- dispatch ---------------------------------------------------------
+
+    async def _on_bot_message(self, event) -> None:
+        # The bot is private to one person: anyone else gets no response at all.
+        if int(getattr(event, "sender_id", 0) or 0) != self.owner_id:
+            return
+        await self._handle_text((event.message.message or "").strip())
 
     async def _on_message(self, event) -> None:
         if self.chat_id is None or int(getattr(event, "chat_id", 0) or 0) not in (
@@ -113,7 +147,9 @@ class Control:
             return
         if int(event.message.id) in self._own_messages:
             return
-        text = (event.message.message or "").strip()
+        await self._handle_text((event.message.message or "").strip())
+
+    async def _handle_text(self, text: str) -> None:
         if not text or text[0] not in PREFIXES:
             return
         try:

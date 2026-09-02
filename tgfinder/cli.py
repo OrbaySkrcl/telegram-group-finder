@@ -15,7 +15,7 @@ from .config import load_config
 from .db import Database
 from .prices import MarketData
 from .scoring import compute_stats
-from .tgclient import build_client, channel_identity
+from .tgclient import build_bot, build_client, channel_identity
 from .tracker import Tracker
 
 log = logging.getLogger("tgfinder")
@@ -230,22 +230,33 @@ async def cmd_run(args, cfg, db) -> int:
                 log.warning("nothing is monitored yet - message the control chat "
                             "with /backfill @channel 14 to get started")
 
-            # The control chat turns the service into something you can drive
+            # The control surface turns the service into something you can drive
             # from Telegram, so a terminal is never required to use it.
-            control = Control(db, client, market, cfg, collector, tracker)
+            bot = await build_bot(cfg)
+            control = Control(db, client, market, cfg, collector, tracker, bot=bot)
             await control.start()
+            log.info("control surface: %s",
+                     "bot chat" if control.uses_bot else f"chat {cfg.report_chat!r}")
 
-            await asyncio.gather(
+            tasks = [
                 tracker.run_forever(),
-                _daily_report(client, db, cfg),
+                _daily_report(control, db, cfg),
                 client.run_until_disconnected(),
-            )
+            ]
+            if bot is not None:
+                tasks.append(bot.run_until_disconnected())
+            try:
+                await asyncio.gather(*tasks)
+            finally:
+                if bot is not None:
+                    await bot.disconnect()
     finally:
         await market.aclose()
     return 0
 
 
-async def _daily_report(client, db, cfg) -> None:  # pragma: no cover - timing loop
+async def _daily_report(control, db, cfg) -> None:  # pragma: no cover - timing loop
+    """Post the leaderboard once a day, through whichever control surface is live."""
     import datetime as dt
     while True:
         now = dt.datetime.now(dt.timezone.utc)
@@ -255,11 +266,8 @@ async def _daily_report(client, db, cfg) -> None:  # pragma: no cover - timing l
         await asyncio.sleep((target - now).total_seconds())
         try:
             stats = compute_stats(db, cfg.window_days, cfg.min_calls)
-            await client.send_message(
-                cfg.report_chat, report.render_telegram(stats, cfg.window_days),
-                link_preview=False, parse_mode=None,
-            )
-            log.info("daily report sent to %s", cfg.report_chat)
+            await control.send(report.render_telegram(stats, cfg.window_days))
+            log.info("daily report sent")
         except Exception:
             log.exception("could not send the daily report")
 

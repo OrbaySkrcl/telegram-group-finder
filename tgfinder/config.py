@@ -53,6 +53,11 @@ class Config:
     report_hour_utc: int
     max_joins_per_day: int
 
+    # Optional bot transport. Defaulted and kept last so adding a setting never
+    # breaks a caller that builds a Config positionally.
+    bot_token: str = ""
+    owner_id: int = 0
+
     @property
     def horizon_sec(self) -> int:
         return self.horizon_hours * 3600
@@ -74,6 +79,8 @@ def load_config() -> Config:
         horizon_hours=_i("SIM_HORIZON_HOURS", 24),
         window_days=_i("SCORE_WINDOW_DAYS", 30),
         min_calls=_i("SCORE_MIN_CALLS", 5),
+        bot_token=os.environ.get("TG_BOT_TOKEN", "").strip(),
+        owner_id=_i("TG_OWNER_ID", 0),
         report_chat=os.environ.get("REPORT_CHAT", "me"),
         report_hour_utc=_i("REPORT_HOUR_UTC", 6),
         max_joins_per_day=_i("MAX_JOINS_PER_DAY", 8),

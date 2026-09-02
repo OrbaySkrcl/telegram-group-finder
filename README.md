@@ -100,6 +100,23 @@ Kanalın son 30 günlük mesaj geçmişini okur, contract adreslerini çıkarır
 
 ## Sık sorulanlar
 
+### Komutları nereye yazıyorum? Kendi arayüzü var mı?
+
+Var. **@BotFather** ile kendi botunu oluşturup token'ını `TG_BOT_TOKEN`
+değişkenine koyarsan, sistemin Telegram'da kendi sohbet penceresi olur — tıpkı
+başka bir kişiyle yazışır gibi. Kayıtlı Mesajlar'ındaki özel notlarına hiç
+dokunmaz. Kurulumdaki 3. adım bunu anlatıyor.
+
+Bot sohbetinde komutları **sadece sen** verebilirsin; başka biri botu bulup
+komut yazarsa hiçbir cevap almaz.
+
+Bot kurmazsan sistem `REPORT_CHAT` ne diyorsa orayı dinler; varsayılanı Kayıtlı
+Mesajlar. Bunu kendine açtığın özel bir kanalla da değiştirebilirsin.
+
+> Neden hem kullanıcı hesabı hem bot? Çünkü Telegram botları, yönetici olmadıkları
+> kanalları okuyamaz. Kanalları okuyan taraf senin hesabın; bot sadece komut ve
+> rapor arayüzü.
+
 ### Bot kendi kendine gruplara katılıyor mu?
 
 **Hayır.** Hiçbir koşulda kendiliğinden katılmaz. Katılmanın tek yolu, senin
@@ -234,7 +251,40 @@ Colab'da *File → Upload notebook* ile açabilirsin.)
 > Bu araç kanallara katılıyor ve Telegram toplu katılımı hız limitine takıyor.
 > **Ana hesabın yerine ayrı bir numarayla açılmış hesap kullanman önerilir.**
 
-### Adım 3 — Railway'de değişkenleri gir
+### Adım 3 — Kendi botunu oluştur (önerilir)
+
+Telegram'da **@BotFather**'ı aç:
+
+1. `/newbot` yaz
+2. Bir isim ver (örn. `Call Radar`)
+3. Bir kullanıcı adı ver — `bot` ile bitmeli (örn. `orbay_call_radar_bot`)
+4. Sana bir **token** verecek (`123456:AAE...` biçiminde), kopyala
+
+Böylece sistemin Telegram'da **kendi sohbet penceresi** olur; Kayıtlı
+Mesajlar'ındaki özel notlarına hiç karışmaz.
+
+Sonra o botu aç ve **Start**'a bas — Telegram botların ilk mesajı atmasına izin
+vermiyor, önce senin başlatman gerekiyor.
+
+İstersen BotFather'da `/setcommands` yazıp botunu seçtikten sonra şunu yapıştır,
+komutlar menüde çıkar:
+
+```
+help - Komut listesi
+score - Liderlik tablosu
+backfill - Bir kanalın geçmişini çek ve puanla
+detail - Bir kanalın çağrı defteri
+channels - İzlenen kanallar
+chains - Hangi ağlarda veri toplandı
+candidates - Aday havuzu
+status - Sistem özeti
+```
+
+> Bot kullanmak istemezsen bu adımı atla — o zaman komutlar Kayıtlı
+> Mesajlar'da dinlenir. `REPORT_CHAT` değişkenine başka bir sohbet de
+> verebilirsin (örneğin kendine açtığın özel bir kanalın kullanıcı adı).
+
+### Adım 4 — Railway'de değişkenleri gir
 
 Servisin sayfasında **Variables** sekmesi → şu dördünü ekle:
 
@@ -243,18 +293,19 @@ Servisin sayfasında **Variables** sekmesi → şu dördünü ekle:
 | `TG_API_ID` | Adım 1'deki sayı |
 | `TG_API_HASH` | Adım 1'deki uzun dizi |
 | `TG_SESSION` | Adım 2'deki uzun metin |
+| `TG_BOT_TOKEN` | 3. adımdaki bot token'ı (bot kullanmıyorsan boş bırak) |
 | `DB_PATH` | `/data/tgfinder.db` |
 
-### Adım 4 — Volume ekle (atlanırsa veri kaybolur)
+### Adım 5 — Volume ekle (atlanırsa veri kaybolur)
 
 Servisin sayfasında **Volume** ekle, mount path: `/data`
 
 Bunu yapmazsan her güncellemede topladığın tüm geçmiş silinir.
 
-### Adım 5 — Telegram'dan kullan
+### Adım 6 — Telegram'dan kullan
 
-Deploy bitince Telegram'da **Kayıtlı Mesajlar**'ı (Saved Messages) aç.
-Sistem oraya "tgfinder çalışıyor" yazmış olacak.
+Deploy bitince **botunun sohbetini** aç. Sistem oraya "tgfinder çalışıyor"
+yazmış olacak. (Bot kurmadıysan aynı mesaj Kayıtlı Mesajlar'a düşer.)
 
 ```
 /help                    komut listesi

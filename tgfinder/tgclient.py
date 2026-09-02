@@ -27,6 +27,19 @@ def build_client(cfg: Config) -> TelegramClient:
     return TelegramClient(StringSession(cfg.session), cfg.api_id, cfg.api_hash)
 
 
+async def build_bot(cfg: Config) -> TelegramClient | None:
+    """Optional second client: a BotFather bot that gives the tool its own chat.
+
+    The user account still does the reading - bots cannot read channels they are
+    not administrators of - so the bot is purely the control surface.
+    """
+    if not cfg.bot_token:
+        return None
+    bot = TelegramClient(StringSession(), cfg.api_id, cfg.api_hash)
+    await bot.start(bot_token=cfg.bot_token)
+    return bot
+
+
 def channel_identity(entity) -> tuple[int, str | None, str | None, int | None]:
     """(tg_id, username, title, member_count) for a channel/chat entity."""
     return (

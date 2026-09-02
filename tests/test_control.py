@@ -153,3 +153,90 @@ def test_chains_command_with_no_data_points_at_backfill():
     control, client, _db = make_control()
     asyncio.run(control.dispatch("chains"))
     assert "/backfill" in client.sent[0]
+
+
+# --- bot transport ----------------------------------------------------------
+
+class FakeBot:
+    def __init__(self):
+        self.sent = []          # (peer, text)
+        self.handlers = []
+
+    def add_event_handler(self, callback, event):
+        self.handlers.append(callback)
+
+    async def send_message(self, peer, text, **kwargs):
+        self.sent.append((peer, text))
+        return type("Msg", (), {"id": len(self.sent)})()
+
+
+class FakeUserClient(FakeClient):
+    async def get_me(self):
+        return type("Me", (), {"id": 777})()
+
+    async def get_entity(self, target):
+        raise AssertionError("bot mode must not fall back to a user chat")
+
+
+def make_bot_control():
+    db = Database(":memory:")
+    cfg = Config(api_id=1, api_hash="x", session="x", db_path=":memory:",
+                 entry_delay_sec=60, slippage=0.03, tp_multiple=2.0, sl_drop=0.5,
+                 horizon_hours=24, window_days=30, min_calls=5,
+                 report_chat="me", report_hour_utc=6, max_joins_per_day=8,
+                 bot_token="123:abc")
+    bot = FakeBot()
+    control = Control(db, FakeUserClient(), market=None, cfg=cfg,
+                      collector=FakeCollector(), tracker=None, bot=bot)
+    return control, bot
+
+
+def test_bot_mode_talks_through_the_bot_not_saved_messages():
+    control, bot = make_bot_control()
+    asyncio.run(control.start())
+    assert control.uses_bot
+    # Owner is discovered from the user account; no configuration needed.
+    assert control.owner_id == 777
+    peer, text = bot.sent[0]
+    assert peer == 777
+    assert "tgfinder çalışıyor" in text
+
+
+def test_bot_only_answers_its_owner():
+    control, bot = make_bot_control()
+    asyncio.run(control.start())
+    before = len(bot.sent)
+
+    stranger = type("Event", (), {
+        "sender_id": 999,
+        "message": type("M", (), {"id": 1, "message": "/status"})(),
+    })()
+    asyncio.run(control._on_bot_message(stranger))
+    assert len(bot.sent) == before
+
+    owner = type("Event", (), {
+        "sender_id": 777,
+        "message": type("M", (), {"id": 2, "message": "/status"})(),
+    })()
+    asyncio.run(control._on_bot_message(owner))
+    assert "tgfinder durumu" in bot.sent[-1][1]
+
+
+def test_an_explicit_owner_id_overrides_the_detected_one():
+    control, bot = make_bot_control()
+    object.__setattr__(control.cfg, "owner_id", 12345)
+    asyncio.run(control.start())
+    assert control.owner_id == 12345
+
+
+def test_startup_survives_an_owner_who_has_not_pressed_start():
+    """A bot cannot message someone until they open it, and that must not take
+    the whole service down on boot."""
+    control, bot = make_bot_control()
+
+    async def refuse(peer, text, **kwargs):
+        raise RuntimeError("bot can't initiate conversation with a user")
+    bot.send_message = refuse
+
+    asyncio.run(control.start())        # must not raise
+    assert control.owner_id == 777
