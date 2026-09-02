@@ -5,15 +5,21 @@ Neither needs an API key, which is what keeps the whole system free to run.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 
 import httpx
 
+log = logging.getLogger("tgfinder.prices")
+
 DEXSCREENER = "https://api.dexscreener.com"
 GECKOTERMINAL = "https://api.geckoterminal.com/api/v2"
 
-# DexScreener chainId -> GeckoTerminal network slug.
+# DexScreener chainId -> GeckoTerminal network slug, for the pairs whose names
+# genuinely differ. Anything not listed here is resolved against GeckoTerminal's
+# live network directory at runtime, so a chain that did not exist when this was
+# written still works without a code change.
 NETWORK_MAP = {
     "solana": "solana",
     "ethereum": "eth",
@@ -107,6 +113,8 @@ def _best_pair(pairs: list[dict], address: str) -> PairInfo | None:
 
 
 class MarketData:
+    _networks: list[dict] | None = None
+
     def __init__(self, timeout: float = 20.0):
         self._client = httpx.AsyncClient(
             timeout=timeout,
@@ -116,6 +124,7 @@ class MarketData:
         # free tier is 30 req/min. Stay comfortably underneath both.
         self._ds_limit = RateLimiter(240, 60.0)
         self._gt_limit = RateLimiter(25, 60.0)
+        self._slug_cache: dict[str, str | None] = {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -179,10 +188,54 @@ class MarketData:
         found = await self.lookup_tokens([address])
         return found.get(address) or await self.search(address)
 
+    async def _load_networks(self) -> list[dict]:
+        """GeckoTerminal's own list of supported networks (paginated)."""
+        if MarketData._networks is not None:
+            return MarketData._networks
+        networks: list[dict] = []
+        for page in range(1, 6):
+            data = await self._get(f"{GECKOTERMINAL}/networks", self._gt_limit,
+                                   params={"page": page})
+            items = (data or {}).get("data") or []
+            if not items:
+                break
+            networks.extend(items)
+        MarketData._networks = networks
+        return networks
+
+    async def network_slug(self, chain: str) -> str | None:
+        """Map a DexScreener chainId onto a GeckoTerminal network id.
+
+        Static overrides first, then the live directory. Results are cached,
+        including misses, so an unsupported chain is not looked up repeatedly.
+        """
+        if chain in NETWORK_MAP:
+            return NETWORK_MAP[chain]
+        if chain in self._slug_cache:
+            return self._slug_cache[chain]
+
+        def norm(value: str) -> str:
+            return "".join(c for c in (value or "").lower() if c.isalnum())
+
+        target = norm(chain)
+        slug = None
+        for item in await self._load_networks():
+            attrs = item.get("attributes") or {}
+            candidates = (item.get("id"), attrs.get("coingecko_asset_platform_id"),
+                          attrs.get("name"))
+            if any(norm(c) == target for c in candidates if c):
+                slug = item.get("id")
+                break
+        self._slug_cache[chain] = slug
+        if slug is None:
+            log.warning("no GeckoTerminal network matches chain %r - calls on it "
+                        "cannot be scored", chain)
+        return slug
+
     async def ohlcv(self, chain: str, pair_address: str, timeframe: str = "minute",
                     before_ts: int | None = None, limit: int = 1000) -> list[tuple]:
         """Return [(ts, open, high, low, close, volume), ...] ascending by time."""
-        network = NETWORK_MAP.get(chain)
+        network = await self.network_slug(chain)
         if not network:
             return []
         params: dict[str, object] = {"aggregate": 1, "limit": min(limit, 1000), "currency": "usd"}
@@ -214,8 +267,13 @@ class MarketData:
         """Fetch candles spanning [start_ts, end_ts], preferring minute resolution.
 
         GeckoTerminal caps a response at 1000 candles and only retains minute data
-        for a limited window, so fall back to hourly for older calls.
+        for a limited window, so fall back to hourly for older calls. The second
+        element says what happened: "minute", "hour", "none" (no price history for
+        a pool we can otherwise see) or "no_network" (the chain itself is not
+        covered, which is our limitation and not the channel's fault).
         """
+        if await self.network_slug(chain) is None:
+            return [], "no_network"
         for timeframe, step in (("minute", 60), ("hour", 3600)):
             needed = (end_ts - start_ts) // step + 2
             if needed > 1000 and timeframe == "minute":

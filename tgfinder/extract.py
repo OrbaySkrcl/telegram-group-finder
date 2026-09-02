@@ -1,6 +1,7 @@
 """Pull contract addresses and Telegram handles out of free-form message text."""
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 
@@ -8,6 +9,7 @@ B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 B58_INDEX = {c: i for i, c in enumerate(B58_ALPHABET)}
 
 SOLANA_RE = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![1-9A-HJ-NP-Za-km-z])")
+TRON_RE = re.compile(r"(?<![1-9A-HJ-NP-Za-km-z])T[1-9A-HJ-NP-Za-km-z]{33}(?![1-9A-HJ-NP-Za-km-z])")
 EVM_RE = re.compile(r"(?<![0-9a-fA-FxX])0x[0-9a-fA-F]{40}(?![0-9a-fA-F])")
 
 # Telegram handles: t.me/name, https://t.me/name, @name. Invite links (t.me/+hash,
@@ -30,6 +32,7 @@ DENYLIST = {
     "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",    # USDC (eth)
     "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",    # WETH
     "0x0000000000000000000000000000000000000000",
+    "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",            # USDT (tron)
 }
 DENYLIST_LOWER = {a.lower() for a in DENYLIST}
 
@@ -61,6 +64,18 @@ def b58_decode(value: str) -> bytes | None:
     return b"\x00" * pad + raw
 
 
+def is_tron_address(value: str) -> bool:
+    """A Tron address is base58check: 21 payload bytes (0x41 + 20) plus 4 checksum."""
+    if len(value) != 34 or not value.startswith("T"):
+        return False
+    decoded = b58_decode(value)
+    if decoded is None or len(decoded) != 25 or decoded[0] != 0x41:
+        return False
+    payload, checksum = decoded[:21], decoded[21:]
+    digest = hashlib.sha256(hashlib.sha256(payload).digest()).digest()
+    return digest[:4] == checksum
+
+
 def is_solana_address(value: str) -> bool:
     """A Solana mint is a 32-byte base58 public key."""
     if not 32 <= len(value) <= 44:
@@ -71,7 +86,9 @@ def is_solana_address(value: str) -> bool:
 
 @dataclass(frozen=True)
 class Address:
-    chain: str          # "solana" | "evm"
+    chain: str          # "solana" | "evm" | "tron" (address format, not the network:
+                        #  an EVM address is resolved to its real chain by the market
+                        #  lookup, so BSC, Base, Arbitrum and friends all work)
     address: str        # original casing (EVM stored lowercase)
     from_url: bool      # found inside a chart/trade link rather than bare text
 
@@ -91,6 +108,14 @@ def extract_addresses(text: str) -> list[Address]:
         if addr in DENYLIST_LOWER or addr in found:
             continue
         found[addr] = Address("evm", addr, addr in url_hits_lower)
+
+    # Tron first: its addresses are valid base58 too, so the checksum has to
+    # claim them before the Solana pass takes a 34-character string.
+    for match in TRON_RE.finditer(text):
+        addr = match.group(0)
+        if addr in DENYLIST or addr in found or not is_tron_address(addr):
+            continue
+        found[addr] = Address("tron", addr, addr in url_hits)
 
     for match in SOLANA_RE.finditer(text):
         addr = match.group(0)

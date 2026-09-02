@@ -123,3 +123,33 @@ def test_backfill_without_a_channel_name_explains_the_usage():
     control, client, _db = make_control()
     asyncio.run(control.dispatch("backfill"))
     assert "Kullanım" in client.sent[0]
+
+
+def test_chains_command_reports_coverage_per_chain():
+    control, client, db = make_control()
+    db.upsert_channel(1, "c", "C", 10, 1)
+    for chain, market_chain, address, status in (
+        ("solana", "solana", "a1", "done"),
+        ("solana", "solana", "a2", "done"),
+        ("evm", "bsc", "b1", "done"),
+        ("evm", "bsc", "b2", "pending"),
+        ("evm", "brandnew", "c1", "nochain"),
+    ):
+        db.execute("INSERT OR IGNORE INTO tokens(chain,address,market_chain,"
+                   "resolve_status) VALUES(?,?,?,'ok')", (chain, address, market_chain))
+        db.execute("INSERT INTO calls(channel_id,chain,address,ts,status) "
+                   "VALUES(1,?,?,1,?)", (chain, address, status))
+
+    asyncio.run(control.dispatch("chains"))
+    body = client.sent[0]
+    assert "solana" in body and "bsc" in body and "brandnew" in body
+    # bsc: 2 calls, 1 scored, 1 pending
+    bsc_row = [ln for ln in body.splitlines() if ln.startswith("bsc")][0].split()
+    assert bsc_row[1:5] == ["2", "1", "1", "0"]
+    assert "DESTEKSİZ" in body
+
+
+def test_chains_command_with_no_data_points_at_backfill():
+    control, client, _db = make_control()
+    asyncio.run(control.dispatch("chains"))
+    assert "/backfill" in client.sent[0]

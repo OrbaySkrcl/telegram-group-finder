@@ -20,6 +20,7 @@ WINNER = "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"
 LOSER = "9n4nbM75f5Ui33ZbPYXn59EwSgE8CGsHtAeTH5YFeJ9E"
 GHOST = "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr"
 EVM_TOKEN = "0x6982508145454ce325ddbe47a25d4ec3d2311933"
+EXOTIC = "0x1111111111111111111111111111111111111111"
 
 
 class FakeMarket:
@@ -35,6 +36,9 @@ class FakeMarket:
             # "base". Both names have to survive into the scoring join.
             EVM_TOKEN: PairInfo("base", "poolE", EVM_TOKEN, "EVM", "Evm Token",
                                 0.5, 300_000, 80_000, CALL_TS - 1200),
+            # A chain we have no candle source for: resolves fine, cannot be scored.
+            EXOTIC: PairInfo("brandnewchain", "poolX", EXOTIC, "NEW", "New Chain",
+                             1.0, 500_000, 90_000, CALL_TS - 1200),
         }
         # WINNER doubles; LOSER goes to zero.
         self.curves = {"poolW": [1.0, 1.0, 1.4, 2.5], "poolL": [1.0, 1.0, 0.6, 0.02],
@@ -47,6 +51,8 @@ class FakeMarket:
         return self.pairs.get(address)
 
     async def candles_covering(self, chain, pair_address, start_ts, end_ts):
+        if chain == "brandnewchain":
+            return [], "no_network"
         prices = self.curves.get(pair_address)
         if not prices:
             return [], "none"
@@ -85,6 +91,7 @@ def run_pipeline():
         (noisy, FakeMessage(2, f"ape now {LOSER}", CALL_TS + 3660)),
         (noisy, FakeMessage(3, f"next runner {GHOST}", CALL_TS + 3720)),
         (good, FakeMessage(3, f"base play: {EVM_TOKEN}", CALL_TS + 240)),
+        (good, FakeMessage(4, f"new chain play: {EXOTIC}", CALL_TS + 300)),
         # A recap listing many addresses must not be counted as five calls.
         (noisy, FakeMessage(4, f"recap: {WINNER} {LOSER} {GHOST} "
                                f"So11111111111111111111111111111111111111112 "
@@ -120,7 +127,7 @@ def test_evm_call_is_scored_despite_the_chain_name_mismatch():
 
 def test_calls_are_deduplicated_and_recaps_ignored():
     db, _cfg, good, noisy = run_pipeline()
-    assert db.one("SELECT COUNT(*) n FROM calls WHERE channel_id=?", (good,))["n"] == 3
+    assert db.one("SELECT COUNT(*) n FROM calls WHERE channel_id=?", (good,))["n"] == 4
     # noisy: WINNER, LOSER, GHOST once each; the 6-address recap adds nothing.
     assert db.one("SELECT COUNT(*) n FROM calls WHERE channel_id=?", (noisy,))["n"] == 3
 
@@ -161,3 +168,18 @@ def test_leaderboard_prefers_the_first_caller():
 def test_mentioned_handles_become_candidates():
     db, _cfg, _good, _noisy = run_pipeline()
     assert db.one("SELECT handle FROM candidates WHERE handle='otheralpha'") is not None
+
+
+def test_an_unsupported_chain_is_flagged_not_blamed_on_the_channel():
+    # We have no candles for this chain. That is our gap, so the call must be
+    # excluded from every rate rather than counted as the channel's dead link.
+    db, cfg, _good, _noisy = run_pipeline()
+    row = db.one("SELECT status FROM calls WHERE address=?", (EXOTIC,))
+    assert row["status"] == "nochain"
+
+    stats = {s.username: s for s in compute_stats(db, cfg.window_days, cfg.min_calls)}
+    good = stats["goodcalls"]
+    assert good.unsupported_calls == 1
+    assert good.dead_calls == 0
+    assert good.scored_calls == 3
+    assert good.first_share == 1.0        # computed over tradable calls only

@@ -84,10 +84,10 @@ Normalde bir kanalı değerlendirmek için haftalarca beklemen gerekir.
 Telegram'da Kayıtlı Mesajlar'a şunu yaz:
 
 ```
-/backfill @birkanal 14
+/backfill @birkanal 30
 ```
 
-Kanalın son 14 günlük mesaj geçmişini okur, contract adreslerini çıkarır,
+Kanalın son 30 günlük mesaj geçmişini okur, contract adreslerini çıkarır,
 **o günkü mum verisini** GeckoTerminal'den çeker ve simülasyonu geçmişe dönük
 çalıştırır. Birkaç dakika içinde kanalın sicil defteri önünde olur.
 
@@ -95,6 +95,95 @@ Kanalın son 14 günlük mesaj geçmişini okur, contract adreslerini çıkarır
 > çağrılarda otomatik olarak saatlik muma düşer. Saatlik veride bir mum içinde
 > hem 2x hem -%50 görülebilir ve sistem **kötümser** davranıp stop'u varsayar.
 > Yani eski dönem sonuçları gerçekten biraz daha kötü görünür, iyimser değil.
+
+---
+
+## Sık sorulanlar
+
+### Bot kendi kendine gruplara katılıyor mu?
+
+**Hayır.** Hiçbir koşulda kendiliğinden katılmaz. Katılmanın tek yolu, senin
+önce `/approve @kanal` sonra `/join` yazman. Bu iki komutu hiç kullanmasan da
+sistem tam çalışır.
+
+Dahası, **bir kanalı değerlendirmek için üye olman bile gerekmiyor**: herkese
+açık kanalların geçmişini Telegram üye olmadan da okutuyor. Yani:
+
+1. `/backfill @kanal 30` — üye olmadan sicilini çıkar
+2. `/score` — rakamlara bak
+3. Beğenirsen elle katıl, sonra `/monitor @kanal` de
+4. Beğenmezsen hiçbir şey yapma; zaten katılmamıştın
+
+Backfill sonucunda üye olmadığın kanalları ayrıca yazar. Üye olmadığın bir
+kanal **canlı takibe alınmaz** — çünkü Telegram yalnızca üye olduğun sohbetlerin
+yeni mesajlarını gönderir. Geçmiş verisi yine de puanlanır.
+
+Bir gruptan çıkarsan topladığın veri silinmez; skoru tabloda kalır.
+
+> Kendi ana numaranı kullanacaksan: `/join` komutundan uzak dur ve `/backfill`'i
+> tek seferde 3-5 kanaldan fazlasına verme. Sistem kanallar arasında bekliyor ve
+> Telegram "yavaşla" derse elindekini kaydedip duruyor, ama toplu okuma yine de
+> hız limitine takılabilen bir davranış.
+
+### En fazla 14 gün mü çekebiliyorum?
+
+Hayır, 14 sadece örnekti — varsayılan 30 gün ve istediğin sayıyı yazabilirsin:
+
+```
+/backfill @kanal 90
+```
+
+Gerçek sınır Telegram değil, **fiyat geçmişi**:
+
+- Dakikalık mum verisi sadece yakın geçmiş için var. Daha eski çağrılarda sistem
+  otomatik olarak saatlik muma düşer.
+- Saatlik veride bir mum içinde hem 2x hem -%50 görülebilir; sistem bu durumda
+  **kötümser** davranıp stop'u varsayar. Yani eski dönem sonuçları gerçekte
+  olduğundan biraz kötü görünür, iyimser değil.
+- Çok eski çağrılarda tokenlerin havuzu tamamen silinmiş olur; bunlar
+  `DEAD-LINKS` olarak sayılır.
+
+Pratikte **30-60 gün** en sağlıklı aralık. 90 gün de çalışır ama eski kısmı
+daha kaba ölçülür.
+
+### BSC / Solana / başka ağlar — hepsini algılıyor mu?
+
+Sistem zincir listesi tutmuyor, **adres biçimini** tanıyor:
+
+| Biçim | Örnek | Kapsadığı |
+|---|---|---|
+| Solana (base58, 32 bayt) | `EKpQGS...zcjm` | Solana |
+| EVM (`0x` + 40 hex) | `0x2170ed...33f8` | BSC, Ethereum, Base, Arbitrum, Polygon ve DexScreener'ın listelediği tüm EVM ağları |
+| Tron (base58check) | `TLa2f6...YjU7` | Tron |
+
+EVM adresinin hangi ağda olduğunu tahmin etmiyor — DexScreener'a soruyor ve
+cevabı ne gelirse onu kullanıyor. Yani **BSC'yi ayrıca ayarlaman gerekmiyor**,
+kendiliğinden çalışıyor. Aynı mesajda üç farklı ağdan CA varsa üçünü de ayrı
+çağrı olarak kaydeder.
+
+Mum verisi için GeckoTerminal'in ağ listesini çalışma anında çekiyor, dolayısıyla
+bu araç yazıldığında var olmayan yeni bir ağ da kod değişmeden çalışabiliyor.
+
+**Emin olmanın yolu:** birkaç kanal backfill ettikten sonra
+
+```
+/chains
+```
+
+yaz. Hangi ağda kaç çağrı toplandığını ve kaçının puanlanabildiğini gösterir:
+
+```
+ZİNCİR                 ÇAĞRI   PUANLI  BEKLİYOR  DESTEKSİZ
+solana                 48      42      6         0
+bsc                    18      18      0         0
+base                   7       7       0         0
+tron                   3       3       0         0
+yenibirzincir          4       0       0         4
+```
+
+`DESTEKSİZ` sütunu, o ağ için mum verisi bulunamayan çağrılar. Bunlar
+**hiçbir kanalın puanına dahil edilmez** — bu bizim eksiğimiz, kanalın suçu
+değil. Orada sıfırdan büyük bir sayı görürsen bana ağın adını söyle, ekleyelim.
 
 ---
 
@@ -169,13 +258,13 @@ Sistem oraya "tgfinder çalışıyor" yazmış olacak.
 
 ```
 /help                    komut listesi
-/backfill @kanal 14      kanalın son 14 gününü çek ve puanla
+/backfill @kanal 30      kanalın son 30 gününü çek ve puanla
 /score                   liderlik tablosu
 /detail @kanal           o kanalın çağrı çağrı defteri
 /status                  sistem özeti
 ```
 
-**Buradan başla:** zaten üye olduğun kanalları tek tek `/backfill @kanal 14`
+**Buradan başla:** zaten üye olduğun kanalları tek tek `/backfill @kanal 30`
 yaz. Birkaç dakika içinde sicil defterleri önüne gelir.
 
 ---
@@ -184,7 +273,7 @@ yaz. Birkaç dakika içinde sicil defterleri önüne gelir.
 
 | Komut | Ne yapar |
 |---|---|
-| `/backfill @kanal 14` | Geçmişi çeker ve puanlar — **buradan başla** |
+| `/backfill @kanal 30` | Geçmişi çeker ve puanlar — **buradan başla** |
 | `/score` | Liderlik tablosu |
 | `/detail @kanal` | O kanalın çağrı çağrı defteri |
 | `/channels` | İzlenen kanallar |
@@ -193,6 +282,7 @@ yaz. Birkaç dakika içinde sicil defterleri önüne gelir.
 | `/candidates` | Aday havuzu (bahsedilme sıralı) |
 | `/approve @kanal` | Adayı onayla / `/reject` ele |
 | `/join` | Onaylı adaylara katıl (günlük limitli) |
+| `/chains` | Hangi ağlarda veri toplandı, kaçı puanlanabildi |
 | `/status` | Sistem özeti |
 
 Servis ayrıca her gün UTC 06:00'da liderlik tablosunu Kayıtlı Mesajlar'a gönderir.
@@ -214,7 +304,7 @@ pip install -r requirements.txt
 cp .env.example .env      # api_id / api_hash'i içine yaz
 python login.py           # TG_SESSION üretir
 
-python -m tgfinder backfill @kanal --days 14
+python -m tgfinder backfill @kanal --days 30
 python -m tgfinder score
 python -m tgfinder detail @kanal
 python -m tgfinder channels

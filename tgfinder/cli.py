@@ -187,8 +187,9 @@ async def cmd_backfill(args, cfg, db) -> int:
                     print(f"  {handle}: cannot resolve ({exc})")
                     continue
                 info = await collector.backfill(entity, args.days, args.limit)
+                note = "" if info.get("member") else "  [not a member: history only]"
                 print(f"  {handle}: {info['messages']} messages, "
-                      f"{info['new_calls']} new calls")
+                      f"{info['new_calls']} new calls{note}")
 
         print("\nResolving prices and replaying outcomes (this is the slow part)...")
         tracker = Tracker(db, market, cfg)
@@ -304,7 +305,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("backfill", help="score a channel from its history, right now")
     p.add_argument("handles", nargs="+")
-    p.add_argument("--days", type=int, default=14)
+    p.add_argument("--days", type=int, default=30)
     p.add_argument("--limit", type=int, default=5000, help="max messages to read")
     p.set_defaults(func=cmd_backfill, needs_async=True)
 

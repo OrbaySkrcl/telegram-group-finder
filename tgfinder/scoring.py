@@ -32,6 +32,7 @@ class ChannelStats:
 
     calls: int = 0
     dead_calls: int = 0            # address never resolved to a live pool
+    unsupported_calls: int = 0     # chain we cannot fetch candles for (our gap)
     scored_calls: int = 0          # calls with usable candles
     calls_per_day: float = 0.0
 
@@ -89,7 +90,7 @@ def compute_stats(db, window_days: int, min_calls: int) -> list[ChannelStats]:
     first_ts: dict[tuple, int] = {}
     callers: dict[tuple, set[int]] = {}
     for row in rows:
-        if row["status"] == "unresolved":
+        if row["status"] in ("unresolved", "nochain"):
             continue
         key = (row["chain"], row["address"])
         ts = int(row["ts"])
@@ -123,7 +124,7 @@ def compute_stats(db, window_days: int, min_calls: int) -> list[ChannelStats]:
                         1.0)
         stats.calls_per_day = round(len(calls) / min(span_days, float(window_days)), 2)
 
-        tradable = [c for c in calls if c["status"] != "unresolved"]
+        tradable = [c for c in calls if c["status"] not in ("unresolved", "nochain")]
         returns: list[float] = []
         maxes: list[float] = []
         mcs: list[float] = []
@@ -148,6 +149,11 @@ def compute_stats(db, window_days: int, min_calls: int) -> list[ChannelStats]:
             if row["pair_created_at"]:
                 ages.append(max(0.0, (int(row["ts"]) - int(row["pair_created_at"])) / 60.0))
 
+            if row["status"] == "nochain":
+                # We have no candle source for this chain. Excluded from every
+                # rate so it neither helps nor hurts the channel.
+                stats.unsupported_calls += 1
+                continue
             if row["status"] == "unresolved":
                 # Address never had a tradable pool we could find. Not scored as a
                 # loss (it may not be a token at all) but tracked as a quality signal.
@@ -219,7 +225,8 @@ def _flags(s: ChannelStats) -> list[str]:
         flags.append("LATE")
     if s.rug_rate > 0.35:
         flags.append("RUGGY")
-    if s.calls and s.dead_calls / s.calls > 0.3:
+    judged = s.calls - s.unsupported_calls
+    if judged > 0 and s.dead_calls / judged > 0.3:
         flags.append("DEAD-LINKS")
     # Consistently calling minutes-old tokens *and* eating rugs is what a
     # deployer-adjacent distribution group looks like from the outside.

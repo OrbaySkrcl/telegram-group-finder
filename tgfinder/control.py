@@ -24,7 +24,7 @@ HELP = """tgfinder — komutlar
 Buraya yazdığın komutlara cevap veririm.
 
 BAŞLARKEN
-  /backfill @kanal 14   kanalın son 14 gününü çek ve puanla
+  /backfill @kanal 30   kanalın son 30 gününü çek ve puanla
   /score                liderlik tablosu
   /detail @kanal        o kanalın çağrı çağrı defteri
 
@@ -42,6 +42,7 @@ KEŞİF
 
 DURUM
   /status               sistem özeti
+  /chains               hangi zincirlerde veri toplandı
   /help                 bu liste
 
 Not: @kanal yerine kanal linkini de yapıştırabilirsin."""
@@ -167,7 +168,7 @@ class Control:
             await self.send(
                 "Henüz yeterli veri yok.\n"
                 f"En az {self.cfg.min_calls} çağrısı olan kanal gerekiyor.\n"
-                "Başlamak için: /backfill @birkanal 14"
+                "Başlamak için: /backfill @birkanal 30"
             )
             return
         await self.send(report.render_telegram(stats, days))
@@ -183,7 +184,7 @@ class Control:
         )
         if row is None:
             await self.send(f"Bu kanal kayıtlı değil: {handle}\n"
-                            "Önce: /backfill @kanal 14")
+                            "Önce: /backfill @kanal 30")
             return
         await self.send(report.render_channel_detail(self.db, int(row["id"])), code=True)
 
@@ -194,7 +195,7 @@ class Control:
             "FROM channels c ORDER BY calls DESC LIMIT 60"
         )
         if not rows:
-            await self.send("Hiç kanal yok. /backfill @kanal 14 ile başla.")
+            await self.send("Hiç kanal yok. /backfill @kanal 30 ile başla.")
             return
         lines = [f"{'KANAL':30} {'ÇAĞRI':6} DİNLE", "-" * 46]
         for r in rows:
@@ -226,7 +227,8 @@ class Control:
 
     async def _cmd_backfill(self, args) -> None:
         if not args:
-            await self.send("Kullanım: /backfill @kanal 14")
+            await self.send("Kullanım: /backfill @kanal 30\n"
+                            "Gün sayısı serbest: 7, 30, 90...")
             return
         if self._busy:
             await self.send("Zaten bir backfill çalışıyor, bitince haber veririm.")
@@ -239,7 +241,7 @@ class Control:
             else:
                 handles.append(_clean_handle(token))
         if not handles:
-            await self.send("Kanal adı vermedin. Örnek: /backfill @kanal 14")
+            await self.send("Kanal adı vermedin. Örnek: /backfill @kanal 30")
             return
         asyncio.create_task(self._run_backfill(handles, days))
         await self.send(f"{len(handles)} kanal için son {days} gün çekiliyor. "
@@ -249,17 +251,38 @@ class Control:
         self._busy = True
         try:
             summary = []
-            for handle in handles:
+            not_joined = []
+            for i, handle in enumerate(handles):
+                if i:
+                    # Reading many channels back to back is what triggers
+                    # Telegram's rate limiter. Space them out.
+                    await asyncio.sleep(5)
                 try:
                     entity = await self.client.get_entity(handle)
                 except Exception as exc:
                     summary.append(f"  {handle}: bulunamadı ({exc})")
                     continue
                 info = await self.collector.backfill(entity, days)
-                summary.append(f"  {handle}: {info['messages']} mesaj, "
-                               f"{info['new_calls']} yeni çağrı")
+                line = (f"  {handle}: {info['messages']} mesaj, "
+                        f"{info['new_calls']} yeni çağrı")
+                if info.get("flood_wait"):
+                    line += f"  [Telegram {info['flood_wait']}sn yavaşlat dedi]"
+                elif info.get("truncated"):
+                    line += "  [mesaj limitine takıldı]"
+                if info.get("member") is False:
+                    line += "  [üye değilsin]"
+                    not_joined.append(handle)
+                summary.append(line)
             self.collector.refresh_monitored(force=True)
-            await self.send("Mesajlar çekildi:\n" + "\n".join(summary)
+
+            note = ""
+            if not_joined:
+                note = ("\n\nÜye olmadığın kanallar: " + ", ".join(not_joined) +
+                        "\nGeçmişleri okundu ve puanlanacak, ama CANLI takip için "
+                        "üye olman gerekiyor (Telegram sadece üye olduğun "
+                        "sohbetlerin yeni mesajlarını gönderiyor). Beğenirsen "
+                        "elle katıl, sonra /monitor @kanal yaz.")
+            await self.send("Mesajlar çekildi:\n" + "\n".join(summary) + note
                             + "\n\nŞimdi fiyat geçmişi işleniyor...")
 
             totals = await self.tracker.drain()
@@ -281,6 +304,38 @@ class Control:
             await self.send(f"Backfill hatası: {exc}")
         finally:
             self._busy = False
+
+    async def _cmd_chains(self, args) -> None:
+        """Which chains the collected calls are on, and how many were scorable.
+
+        This is the honest answer to "does it handle my chains?" - measured on
+        your own data rather than promised.
+        """
+        rows = self.db.query(
+            """
+            SELECT COALESCE(t.market_chain, c.chain || ' (çözülmedi)') AS net,
+                   COUNT(*) AS n_calls,
+                   SUM(CASE WHEN c.status = 'done'    THEN 1 ELSE 0 END) AS scored,
+                   SUM(CASE WHEN c.status = 'nochain' THEN 1 ELSE 0 END) AS nochain,
+                   SUM(CASE WHEN c.status = 'pending' THEN 1 ELSE 0 END) AS pending
+              FROM calls c
+              LEFT JOIN tokens t ON t.chain = c.chain AND t.address = c.address
+             GROUP BY net
+             ORDER BY n_calls DESC
+            """
+        )
+        if not rows:
+            await self.send("Henüz hiç çağrı toplanmadı. /backfill @kanal 30 dene.")
+            return
+        lines = [f"{'ZİNCİR':22} {'ÇAĞRI':7} {'PUANLI':7} {'BEKLİYOR':9} DESTEKSİZ",
+                 "-" * 62]
+        for r in rows:
+            lines.append(f"{r['net'][:22]:22} {r['n_calls']:<7} {r['scored']:<7} "
+                         f"{r['pending']:<9} {r['nochain']}")
+        lines.append("")
+        lines.append("DESTEKSİZ = o zincir için mum verisi bulunamadı; bu çağrılar")
+        lines.append("hiçbir kanalın puanına dahil edilmez (bizim eksiğimiz).")
+        await self.send("\n".join(lines), code=True)
 
     async def _cmd_discover(self, args) -> None:
         keywords = [" ".join(args)] if args else discovery.DEFAULT_KEYWORDS
@@ -331,4 +386,4 @@ class Control:
             return
         await self.send(f"Katıldım: {', '.join(joined)}\n"
                         f"Geçmişlerini de çekmek için: /backfill "
-                        f"{' '.join('@' + h for h in joined[:3])} 14")
+                        f"{' '.join('@' + h for h in joined[:3])} 30")

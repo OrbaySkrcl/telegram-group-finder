@@ -119,15 +119,21 @@ class Tracker:
 
         now = int(time.time())
         if not candles:
-            # No price history we can trust: record it as unscorable rather than
-            # dropping it, so the channel's dead-link rate stays visible.
+            # Two different failures, kept apart on purpose. "no_network" means we
+            # have no candle source for that chain - a gap in this tool, and it
+            # would be unfair to charge it to the channel. "no_data" means the pool
+            # exists but has no usable history, which is the channel's problem.
+            unsupported = source == "no_network"
             self.db.execute(
                 "INSERT OR REPLACE INTO outcomes(call_id, exit_reason, candle_source, "
-                "computed_at) VALUES(?, 'no_data', 'none', ?)",
-                (int(row["id"]), now),
+                "computed_at) VALUES(?, ?, ?, ?)",
+                (int(row["id"]), "no_network" if unsupported else "no_data",
+                 source, now),
             )
-            self.db.execute("UPDATE calls SET status='unresolved' WHERE id=?",
-                            (int(row["id"]),))
+            self.db.execute(
+                "UPDATE calls SET status=? WHERE id=?",
+                ("nochain" if unsupported else "unresolved", int(row["id"])),
+            )
             return
 
         result = simulate(candles, call_ts, self.params)

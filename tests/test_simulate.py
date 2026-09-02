@@ -77,3 +77,26 @@ def test_horizon_stops_the_replay():
 
 def test_no_candles_is_no_data():
     assert simulate([], T0, P).exit_reason == "no_data"
+
+
+# --- address extraction across chains ---------------------------------------
+
+from tgfinder.extract import extract_addresses, is_tron_address  # noqa: E402
+
+
+def test_all_three_address_formats_are_picked_out_of_one_message():
+    text = ("BSC: 0x2170ed0880ac9a755fd29b2688956bd959f933f8\n"
+            "SOL: EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm\n"
+            "TRON: TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7")
+    found = {a.chain: a.address for a in extract_addresses(text)}
+    assert set(found) == {"evm", "solana", "tron"}
+
+
+def test_tron_checksum_rejects_a_corrupted_address():
+    assert is_tron_address("TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7")
+    assert not is_tron_address("TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU8")
+
+
+def test_a_tron_address_is_not_mistaken_for_a_solana_one():
+    addrs = extract_addresses("TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7")
+    assert [a.chain for a in addrs] == ["tron"]
